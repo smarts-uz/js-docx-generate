@@ -25,26 +25,36 @@ async function fetchData() {
     });
 
     const [rows] = await connection.execute("Call get__refunded_orders_data(372)");
+    const [rows2] = await connection.execute("Call get__refunded_order_payment_data(372)");
+    // rows2[0] is the actual data for stored procedures in mysql2
+    const paymentData = Array.isArray(rows2) && Array.isArray(rows2[0]) ? rows2[0][0] : (rows2[0] || {});
     await connection.end();
     // rows[0] is the actual data for stored procedures in mysql2
-    return Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : rows;
+    return {
+        dbRows: Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : rows,
+        paymentData
+    };
 }
 
 // 2. Generate docx from data
 async function generateDocx() {
     // Fetch data from DB
-    const dbRows = await fetchData();
+    const { dbRows, paymentData } = await fetchData();
 
     // Example static data for landlord/tenant
     const landlord = {
-        name: "Ya.T.T Mavlyanov A. X.",
-        address: "Toshkent sh., Mirzo Ulug'bek t-n, Oltin tepa ko'chasi, 186-uy.",
-        phone: "+998 97 402 02 29.\n+998 33 302 77 77."
+        name: paymentData?.vendor_display_name,
+        address: paymentData?.vendor_addres,
+        phone: [paymentData?.vendor_phone, paymentData?.vendor_phone_second]
+            .filter(p => p && p !== 'null')
+            .join('\n')
     };
     const tenant = {
-        name: "Ilyos oka",
-        address: "Toshkent sh., Uch tepa t-n, Kucha ok-teta, art haus",
-        phone: "+998 94 771 70 33\n+998 97"
+        name: paymentData?.customer_display_name,
+        address: paymentData?.customer_addres,
+        phone: [paymentData?.customer_phone, paymentData?.customer_phone_second]
+            .filter(p => p && p !== 'null')
+            .join('\n')
     };
 
     // Split data into yuborilganlar (is_refund == 0) and qaytganlar (is_refund == 1)
@@ -63,11 +73,13 @@ async function generateDocx() {
 
     // Helper to format price
     function priceText(price) {
-        return price !== null && price !== undefined ? `${price.toLocaleString()} so'm` : "";
+        if (price === null || price === undefined) return "0 so'm";
+        return `${Number(price).toLocaleString()} so'm`;
     }
     // Helper to format total price
     function totalPriceText(total) {
-        return total !== null && total !== undefined ? `${total.toLocaleString()} so'm` : "";
+        if (total === null || total === undefined) return "0 so'm";
+        return `${Number(total).toLocaleString()} so'm`;
     }
     // Helper to format date
     function dateText(date) {
@@ -123,11 +135,18 @@ async function generateDocx() {
         totalPriceText(row.lost_qty * row.regular_price)
     ]);
 
-    // Totals (dummy, you can calculate as needed)
+    // Totals from paymentData
+    // total_payment_amount as To'langan
+    // delivery_price as yetkazib berish narxi
+    // lost_debt_price as yo'qotilgan tovarlar uchun shtraf
+    function formatSum(val) {
+        if (val === null || val === undefined) return "0 so'm";
+        return `${Number(val).toLocaleString()} so'm`;
+    }
     const totals = [
-        ["Jami ijara haqqi", "272 000 so'm"],
-        ["Yetkazib berish narxi", "200 000 so'm"],
-        ["Oldindan to'langan summa", "100 000 so'm"],
+        ["To'langan", formatSum(paymentData?.total_payment_amount)],
+        ["Yetkazib berish narxi", formatSum(paymentData?.delivery_price)],
+        ["Yo'qotilgan tovarlar uchun shtraf", formatSum(paymentData?.lost_debt_price)],
     ];
 
     const doc = new Document({
@@ -461,40 +480,25 @@ async function generateDocx() {
                                     ]
                                 })
                             ),
-                            // Grand total row
-                            new TableRow({
-                                children: [
-                                    new TableCell({
-                                        children: [
-                                            new Paragraph({
-                                                children: [
-                                                    new TextRun({ text: "Jami:", bold: true, size: 24, font: "Times New Roman" })
-                                                ]
-                                            })
-                                        ]
-                                    }),
-                                    new TableCell({
-                                        children: [
-                                            new Paragraph({
-                                                children: [
-                                                    new TextRun({ text: "372 000 so'm", bold: true, size: 24, font: "Times New Roman" })
-                                                ],
-                                                alignment: AlignmentType.RIGHT
-                                            })
-                                        ]
-                                    }),
-                                ]
-                            }),
                         ]
                     }),
                     new Paragraph({ text: "" }), // Spacer
 
                     // Payment info
-                    new Paragraph({ text: "UZCARD    8600 3304 4420 3366" }),
-                    new Paragraph({ text: "HUMO      9860 0101 0166 0192" }),
-                    new Paragraph({ text: "MAVLYANOV AZIZXON" }),
-                    new Paragraph({ text: "" }),
-                    new Paragraph({ text: "Mavlyanov A.X", alignment: AlignmentType.LEFT }),
+                    new Paragraph({
+                        text: paymentData?.vendor_card2_name && paymentData?.vendor_card2_number
+                            ? `${paymentData.vendor_card2_name}    ${paymentData.vendor_card2_number}`
+                            : ""
+                    }),
+                    new Paragraph({
+                        text: paymentData?.vendor_card1_name && paymentData?.vendor_card1_number
+                            ? `${paymentData.vendor_card1_name}    ${paymentData.vendor_card1_number}`
+                            : ""
+                    }),
+                    new Paragraph({ text: "" }), // Add space before landlord name
+                    new Paragraph({
+                        text: landlord.name || ""
+                    })
                 ]
             }
         ]
