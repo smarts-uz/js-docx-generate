@@ -65,7 +65,10 @@ async function generateDocx() {
     function priceText(price) {
         return price !== null && price !== undefined ? `${price.toLocaleString()} so'm` : "";
     }
-
+    // Helper to format total price
+    function totalPriceText(total) {
+        return total !== null && total !== undefined ? `${total.toLocaleString()} so'm` : "";
+    }
     // Helper to format date
     function dateText(date) {
         if (!date) return "";
@@ -106,7 +109,18 @@ async function generateDocx() {
         qtyText(Math.abs(row.product_qty)),
         dateTextDDMMYYYY(row.end_date), // qaytgan sanasi
         usedDaysText(row.used_days), // ishlatilgan kuni
-        priceText(row.price) // kunlik narxi
+        priceText(row.price), // kunlik narxi
+        totalPriceText(row.price * row.used_days) // umumiy narxi
+    ]);
+
+    // Yo'qotilganlar table rows (is_refund == null && is_bundle == null)
+    const yoqotilganlar = dbRows.filter(row => row.is_refund == null && row.is_bundle == null);
+    const yoqotilganlarRows = yoqotilganlar.map((row, idx) => [
+        String(idx + 1),
+        row.post_title,
+        qtyText(row.lost_qty),
+        priceText(row.regular_price),
+        totalPriceText(row.lost_qty * row.regular_price)
     ]);
 
     // Totals (dummy, you can calculate as needed)
@@ -312,7 +326,7 @@ async function generateDocx() {
                         rows: [
                             new TableRow({
                                 children: [
-                                    ...["№", "Mahsulot nomi", "Soni", "Qaytgan sanasi", "Ishlatilgan kuni", "Kunlik narxi"].map(header =>
+                                    ...["№", "Mahsulot nomi", "Soni", "Qaytgan sanasi", "Ishlatilgan kuni", "Kunlik narxi", "Umumiy narxi"].map(header =>
                                         new TableCell({
                                             children: [
                                                 new Paragraph({
@@ -350,6 +364,65 @@ async function generateDocx() {
                                             new TableCell({
                                                 children: [new Paragraph({ text: "Ma'lumot yo'q", alignment: AlignmentType.CENTER })],
                                                 columnSpan: 6
+                                            })
+                                        ]
+                                    })
+                                ]
+                            )
+                        ]
+                    }),
+                    new Paragraph({ text: "" }), // Spacer
+
+                    // Yo'qotilganlar Table
+                    new Paragraph({
+                        children: [
+                            new TextRun({ text: "Yo'qotilganlar", bold: true, size: 28, font: "Times New Roman" })
+                        ],
+                        spacing: { after: 100 }
+                    }),
+                    new Table({
+                        width: { size: 100, type: WidthType.PERCENTAGE },
+                        rows: [
+                            new TableRow({
+                                children: [
+                                    ...["№", "Mahsulot nomi", "Soni", "Narxi", "Umumiy narxi"].map(header =>
+                                        new TableCell({
+                                            children: [
+                                                new Paragraph({
+                                                    children: [
+                                                        new TextRun({ text: header, bold: true, size: 22, font: "Times New Roman" })
+                                                    ],
+                                                    alignment: AlignmentType.CENTER,
+                                                })
+                                            ],
+                                            shading: { fill: "FFE699" },
+                                            borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "000000" } }
+                                        })
+                                    )
+                                ],
+                                tableHeader: true,
+                            }),
+                            ...(yoqotilganlarRows.length > 0
+                                ? yoqotilganlarRows.map(row =>
+                                    new TableRow({
+                                        children: row.map(val =>
+                                            new TableCell({
+                                                children: [
+                                                    new Paragraph({
+                                                        text: val,
+                                                        alignment: AlignmentType.CENTER
+                                                    })
+                                                ]
+                                            })
+                                        )
+                                    })
+                                )
+                                : [
+                                    new TableRow({
+                                        children: [
+                                            new TableCell({
+                                                children: [new Paragraph({ text: "Ma'lumot yo'q", alignment: AlignmentType.CENTER })],
+                                                columnSpan: 5
                                             })
                                         ]
                                     })
