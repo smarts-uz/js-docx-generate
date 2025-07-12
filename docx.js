@@ -24,22 +24,27 @@ async function fetchData() {
         database: "lesaapp"
     });
 
-    const [rows] = await connection.execute("Call get__refunded_orders_data(372)");
-    const [rows2] = await connection.execute("Call get__refunded_order_payment_data(372)");
+    const order_id = 372;
+
+    const [rows] = await connection.execute(`Call get__refunded_orders_data(${order_id})`);
+    const [rows2] = await connection.execute(`Call get__refunded_order_payment_data(${order_id})`);
+    // Fetch all payments for this order
+    const [paymentRows] = await connection.execute(`SELECT payment_amount, payment_type, date FROM app_order_payment WHERE order_id = ?`, [order_id]);
     // rows2[0] is the actual data for stored procedures in mysql2
     const paymentData = Array.isArray(rows2) && Array.isArray(rows2[0]) ? rows2[0][0] : (rows2[0] || {});
     await connection.end();
     // rows[0] is the actual data for stored procedures in mysql2
     return {
         dbRows: Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : rows,
-        paymentData
+        paymentData,
+        paymentRows: Array.isArray(paymentRows) ? paymentRows : []
     };
 }
 
 // 2. Generate docx from data
 async function generateDocx() {
     // Fetch data from DB
-    const { dbRows, paymentData } = await fetchData();
+    const { dbRows, paymentData, paymentRows } = await fetchData();
 
     // Example static data for landlord/tenant
     const landlord = {
@@ -122,7 +127,7 @@ async function generateDocx() {
         dateTextDDMMYYYY(row.end_date), // qaytgan sanasi
         usedDaysText(row.used_days), // ishlatilgan kuni
         priceText(row.price), // kunlik narxi
-        totalPriceText(row.price * row.used_days) // umumiy narxi
+        totalPriceText(row.price * row.used_days * row.product_qty) // umumiy narxi
     ]);
 
     // Yo'qotilganlar table rows (is_refund == null && is_bundle == null)
@@ -134,6 +139,36 @@ async function generateDocx() {
         priceText(row.regular_price),
         totalPriceText(row.lost_qty * row.regular_price)
     ]);
+
+    // --- To'lovlar Table Data ---
+    // First row: prepayment amount
+    const tolovlarRows = [];
+    if (paymentData?.prepayment_amount) {
+        tolovlarRows.push([
+            priceText(paymentData.prepayment_amount),
+            "Oldindan to'lov miqdori",
+            paymentData?.prepayment_date ? dateTextDDMMYYYY(paymentData.prepayment_date) : ""
+        ]);
+    }
+    // Payment rows from app_order_payment
+    let jami = 0;
+    paymentRows.forEach(row => {
+        const amount = Number(row.payment_amount) || 0;
+        jami += amount;
+        tolovlarRows.push([
+            priceText(amount),
+            row.payment_type || "",
+            dateTextDDMMYYYY(row.date)
+        ]);
+    });
+    // Add jami row
+    if (tolovlarRows.length > 0) {
+        tolovlarRows.push([
+            priceText((Number(paymentData?.prepayment_amount) || 0) + jami),
+            "Jami",
+            ""
+        ]);
+    }
 
     // Totals from paymentData
     // total_payment_amount as To'langan
@@ -147,6 +182,8 @@ async function generateDocx() {
         ["To'langan", formatSum(paymentData?.total_payment_amount)],
         ["Yetkazib berish narxi", formatSum(paymentData?.delivery_price)],
         ["Yo'qotilgan tovarlar uchun shtraf", formatSum(paymentData?.lost_debt_price)],
+        ["Arendadan qarzdorlik", formatSum(paymentData?.rental_debt_price)],
+        ["Umumiy qarzdorlik", formatSum(paymentData?.total_debt_price)]
     ];
 
     const doc = new Document({
@@ -442,6 +479,64 @@ async function generateDocx() {
                                             new TableCell({
                                                 children: [new Paragraph({ text: "Ma'lumot yo'q", alignment: AlignmentType.CENTER })],
                                                 columnSpan: 5
+                                            })
+                                        ]
+                                    })
+                                ]
+                            )
+                        ]
+                    }),
+                    new Paragraph({ text: "" }), // Spacer
+                    // --- To'lovlar Table ---
+                    new Paragraph({
+                        children: [
+                            new TextRun({ text: "To'lovlar", bold: true, size: 28, font: "Times New Roman" })
+                        ],
+                        spacing: { after: 100 }
+                    }),
+                    new Table({
+                        width: { size: 100, type: WidthType.PERCENTAGE },
+                        rows: [
+                            new TableRow({
+                                children: [
+                                    ...["To'lov miqdori", "To'lov turi", "To'lov sanasi"].map(header =>
+                                        new TableCell({
+                                            children: [
+                                                new Paragraph({
+                                                    children: [
+                                                        new TextRun({ text: header, bold: true, size: 22, font: "Times New Roman" })
+                                                    ],
+                                                    alignment: AlignmentType.CENTER,
+                                                })
+                                            ],
+                                            shading: { fill: "B6D7A8" },
+                                            borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "000000" } }
+                                        })
+                                    )
+                                ],
+                                tableHeader: true,
+                            }),
+                            ...(tolovlarRows.length > 0
+                                ? tolovlarRows.map(row =>
+                                    new TableRow({
+                                        children: row.map(val =>
+                                            new TableCell({
+                                                children: [
+                                                    new Paragraph({
+                                                        text: val,
+                                                        alignment: AlignmentType.CENTER
+                                                    })
+                                                ]
+                                            })
+                                        )
+                                    })
+                                )
+                                : [
+                                    new TableRow({
+                                        children: [
+                                            new TableCell({
+                                                children: [new Paragraph({ text: "Ma'lumot yo'q", alignment: AlignmentType.CENTER })],
+                                                columnSpan: 3
                                             })
                                         ]
                                     })
