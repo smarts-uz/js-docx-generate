@@ -1,0 +1,8 @@
+{
+  "name": "docx-generate",
+  "type": "module",
+  "dependencies": {
+    "docx": "^9.5.1",
+    "mysql2": "^3.14.2"
+  }
+}
