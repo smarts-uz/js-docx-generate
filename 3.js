@@ -103,7 +103,7 @@ async function generateSingleDocumentWithAllOrders() {
                                         alignment: AlignmentType.CENTER,
                                     })
                                 ],
-                                shading: { fill: "D9D9D9" },
+                                shading: { fill: "a9cce3" },
                                 borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "000000" } }
                             })
                         )
@@ -166,7 +166,7 @@ async function generateSingleDocumentWithAllOrders() {
                                         alignment: AlignmentType.CENTER,
                                     })
                                 ],
-                                shading: { fill: "F2DCDB" },
+                                shading: { fill: "f9e79f" },
                                 borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "000000" } }
                             })
                         )
@@ -227,7 +227,7 @@ async function generateSingleDocumentWithAllOrders() {
                                         alignment: AlignmentType.CENTER,
                                     })
                                 ],
-                                shading: { fill: "E2EFDA" },
+                                shading: { fill: "f1948a" },
                                 borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "000000" } }
                             })
                         )
@@ -305,7 +305,7 @@ async function generateSingleDocumentWithAllOrders() {
                                         alignment: AlignmentType.CENTER,
                                     })
                                 ],
-                                shading: { fill: "DDEBF7" },
+                                shading: { fill: "abebc6" },
                                 borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "000000" } }
                             })
                         )
@@ -345,7 +345,45 @@ async function generateSingleDocumentWithAllOrders() {
         // Use destructuring and optional chaining for cleaner extraction
         const data = Array.isArray(rows2) && Array.isArray(rows2[0]) ? rows2[0][0] : rows2[0] || {};
 
-        // Patch all of these fields from the data object
+        // Helper function to check for null or undefined
+        function safeValue(val, fallback = "") {
+            return val !== undefined && val !== null ? val : fallback;
+        }
+
+        // Helper function for numeric fields
+        function safeNumber(val) {
+            return val !== undefined && val !== null ? Number(val).toLocaleString("uz-UZ") : "0";
+        }
+
+        // Helper function to format phone numbers (Uzbekistan style: +998 XX XXX XX XX)
+        function formatPhoneNumber(phone) {
+            if (!phone) return "";
+            // Remove all non-digit characters
+            let digits = phone.replace(/\D/g, "");
+            // If already starts with 998, keep it, else try to add
+            if (digits.length === 9) {
+                // Assume it's just the local part, add +998
+                digits = "998" + digits;
+            } else if (digits.length === 12 && digits.startsWith("998")) {
+                // already correct
+            } else if (digits.length === 13 && digits.startsWith("8")) {
+                // Sometimes numbers start with 8, drop it and add 998
+                digits = "998" + digits.slice(1);
+            }
+            if (digits.length !== 12) return phone; // fallback to original if not matching
+            return `+${digits.slice(0,3)} ${digits.slice(3,5)} ${digits.slice(5,8)} ${digits.slice(8,10)} ${digits.slice(10,12)}`;
+        }
+
+        // Helper function to format card numbers (XXXX XXXX XXXX XXXX)
+        function formatCardNumber(card) {
+            if (!card) return "";
+            let digits = card.replace(/\D/g, "");
+            if (digits.length < 12) return card; // fallback if not enough digits
+            // Group by 4
+            return digits.replace(/(.{4})/g, "$1 ").trim();
+        }
+
+        // Patch all of these fields from the data object, checking for nulls
         const patches = {
             order_items_table: {
                 type: PatchType.DOCUMENT,
@@ -363,14 +401,12 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.DOCUMENT,
                 children: [tolovlarTable],
             },
-            // Numeric and string fields, all patched
+            // Numeric and string fields, all patched with null checks
             t_pay_amount: {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.total_payment_amount !== undefined && data.total_payment_amount !== null
-                            ? Number(data.total_payment_amount).toLocaleString("uz-UZ")
-                            : "0",
+                        text: safeNumber(data.total_payment_amount),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -380,9 +416,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.delivery_price !== undefined && data.delivery_price !== null
-                            ? Number(data.delivery_price).toLocaleString("uz-UZ")
-                            : "0",
+                        text: safeNumber(data.delivery_price),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -392,9 +426,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.lost_debt_price !== undefined && data.lost_debt_price !== null
-                            ? Number(data.lost_debt_price).toLocaleString("uz-UZ")
-                            : "0",
+                        text: safeNumber(data.lost_debt_price),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -404,9 +436,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.rental_debt_price !== undefined && data.rental_debt_price !== null
-                            ? Number(data.rental_debt_price).toLocaleString("uz-UZ")
-                            : "0",
+                        text: safeNumber(data.rental_debt_price),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -416,9 +446,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.total_debt_price !== undefined && data.total_debt_price !== null
-                            ? Number(data.total_debt_price).toLocaleString("uz-UZ")
-                            : "0",
+                        text: safeNumber(data.total_debt_price),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -428,9 +456,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.vendor_display_name !== undefined && data.vendor_display_name !== null
-                            ? data.vendor_display_name
-                            : "",
+                        text: safeValue(data.vendor_display_name),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -440,9 +466,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.vendor_adress !== undefined && data.vendor_adress !== null
-                            ? data.vendor_adress
-                            : "",
+                        text: safeValue(data.vendor_addres),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -452,9 +476,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.card1_name !== undefined && data.card1_name !== null
-                            ? data.card1_name
-                            : "",
+                        text: safeValue(data.vendor_card1_name),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -464,9 +486,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.card2_name !== undefined && data.card2_name !== null
-                            ? data.card2_name
-                            : "",
+                        text: safeValue(data.vendor_card2_name),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -476,9 +496,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.card1_number !== undefined && data.card1_number !== null
-                            ? data.card1_number
-                            : "",
+                        text: formatCardNumber(data.vendor_card1_number),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -488,21 +506,17 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.card2_number !== undefined && data.card2_number !== null
-                            ? data.card2_number
-                            : "",
+                        text: formatCardNumber(data.vendor_card2_number),
                         font: "Times New Roman",
                         size: 24
                     })
                 ]
             },
-            customer: {
+            customer_name: {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.customer !== undefined && data.customer !== null
-                            ? data.customer
-                            : "",
+                        text: safeValue(data.customer_display_name),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -512,9 +526,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.customer_adress !== undefined && data.customer_adress !== null
-                            ? data.customer_adress
-                            : "",
+                        text: safeValue(data.customer_addres),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -524,9 +536,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.vendor_phone !== undefined && data.vendor_phone !== null
-                            ? data.vendor_phone
-                            : "",
+                        text: formatPhoneNumber(data.vendor_phone),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -536,9 +546,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.vendor_phone_second !== undefined && data.vendor_phone_second !== null
-                            ? data.vendor_phone_second
-                            : "",
+                        text: formatPhoneNumber(data.vendor_phone_second),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -548,9 +556,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.customer_phone !== undefined && data.customer_phone !== null
-                            ? data.customer_phone
-                            : "",
+                        text: formatPhoneNumber(data.customer_phone),
                         font: "Times New Roman",
                         size: 24
                     })
@@ -560,9 +566,7 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: data.customer_phone_second !== undefined && data.customer_phone_second !== null
-                            ? data.customer_phone_second
-                            : "",
+                        text: formatPhoneNumber(data.customer_phone_second),
                         font: "Times New Roman",
                         size: 24
                     })
