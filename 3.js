@@ -12,6 +12,7 @@ import {
     AlignmentType,
     BorderStyle
 } from "docx";
+import { type } from "os";
 
 // NOTE: The data from file_context_0 uses keys like post_title, product_qty, start_date, price, is_bundle, is_refund, etc.
 //       There is no product_name, qty, created_at, price_per_day in the data. 
@@ -35,6 +36,7 @@ async function generateSingleDocumentWithAllOrders() {
         // console.dir(rows, { depth: null });
 
         const [rows2] = await connection.execute(`Call get__refunded_order_payment_data(${order_id})`);
+
 
         // Fetch all payments for this order
         const [paymentRows] = await connection.execute(`SELECT payment_amount, payment_type, date FROM app_order_payment WHERE order_id = ?`, [order_id]);
@@ -340,9 +342,10 @@ async function generateSingleDocumentWithAllOrders() {
         });
 
         // rows2data
-        const total_payment_amount = Array.isArray(rows2) && Array.isArray(rows2[0]) ? rows2[0][0]?.total_payment_amount : rows2[0]?.total_payment_amount;
+        // Use destructuring and optional chaining for cleaner extraction
+        const data = Array.isArray(rows2) && Array.isArray(rows2[0]) ? rows2[0][0] : rows2[0] || {};
 
-        // Patch the document to insert all four tables
+        // Patch all of these fields from the data object
         const patches = {
             order_items_table: {
                 type: PatchType.DOCUMENT,
@@ -360,18 +363,211 @@ async function generateSingleDocumentWithAllOrders() {
                 type: PatchType.DOCUMENT,
                 children: [tolovlarTable],
             },
+            // Numeric and string fields, all patched
             t_pay_amount: {
                 type: PatchType.PARAGRAPH,
                 children: [
                     new TextRun({
-                        text: total_payment_amount !== undefined && total_payment_amount !== null
-                            ? Number(total_payment_amount).toLocaleString("uz-UZ")
+                        text: data.total_payment_amount !== undefined && data.total_payment_amount !== null
+                            ? Number(data.total_payment_amount).toLocaleString("uz-UZ")
                             : "0",
                         font: "Times New Roman",
                         size: 24
                     })
                 ]
-            }
+            },
+            d_price: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.delivery_price !== undefined && data.delivery_price !== null
+                            ? Number(data.delivery_price).toLocaleString("uz-UZ")
+                            : "0",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            lost_debt_price: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.lost_debt_price !== undefined && data.lost_debt_price !== null
+                            ? Number(data.lost_debt_price).toLocaleString("uz-UZ")
+                            : "0",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            rental_debt_price: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.rental_debt_price !== undefined && data.rental_debt_price !== null
+                            ? Number(data.rental_debt_price).toLocaleString("uz-UZ")
+                            : "0",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            t_debt_price: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.total_debt_price !== undefined && data.total_debt_price !== null
+                            ? Number(data.total_debt_price).toLocaleString("uz-UZ")
+                            : "0",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            vendor_name: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.vendor_display_name !== undefined && data.vendor_display_name !== null
+                            ? data.vendor_display_name
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            vendor_adress: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.vendor_adress !== undefined && data.vendor_adress !== null
+                            ? data.vendor_adress
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            card1_name: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.card1_name !== undefined && data.card1_name !== null
+                            ? data.card1_name
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            card2_name: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.card2_name !== undefined && data.card2_name !== null
+                            ? data.card2_name
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            card1_number: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.card1_number !== undefined && data.card1_number !== null
+                            ? data.card1_number
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            card2_number: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.card2_number !== undefined && data.card2_number !== null
+                            ? data.card2_number
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            customer: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.customer !== undefined && data.customer !== null
+                            ? data.customer
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            customer_adress: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.customer_adress !== undefined && data.customer_adress !== null
+                            ? data.customer_adress
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            vendor_phone: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.vendor_phone !== undefined && data.vendor_phone !== null
+                            ? data.vendor_phone
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            vendor_phone_second: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.vendor_phone_second !== undefined && data.vendor_phone_second !== null
+                            ? data.vendor_phone_second
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            customer_phone: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.customer_phone !== undefined && data.customer_phone !== null
+                            ? data.customer_phone
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
+            customer_phone_second: {
+                type: PatchType.PARAGRAPH,
+                children: [
+                    new TextRun({
+                        text: data.customer_phone_second !== undefined && data.customer_phone_second !== null
+                            ? data.customer_phone_second
+                            : "",
+                        font: "Times New Roman",
+                        size: 24
+                    })
+                ]
+            },
         };
 
         const templateData = fs.readFileSync("./check_example.docx");
