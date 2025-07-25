@@ -15,16 +15,17 @@ import {
 
 // Statik userlar ro'yxati
 const users = [
-    { ism: "Ali", familiya: "Valiyev" },
-    { ism: "Gulnoza", familiya: "Valiyev" },
-    { ism: "Gulnoza", familiya: "qozi" },
-    { ism: "Jasur", familiya: "qozi" }
+    { ism: "Ali", familiya: "Valiyev", middlename: "Ramz" },
+    { ism: "Gulnoza", familiya: "Valiyev", middlename: "Komol" },
+    { ism: "Gulnoza", familiya: "qozi", middlename: "Komol" },
+    { ism: "Jasur", familiya: "qozi", middlename: "Komol" },
+    
 ];
 
 // Jadval uchun sarlavhalar
-const headers = ["№", "Ism", "Familiya"];
+const headers = ["№", "Ism", "Familiya", "Otasining ismi"];
 
-// Familiyasi yoki ismi bir xil bo'lganlarni birlashtirish uchun yordamchi funksiya
+// Familiyasi, ismi yoki otasining ismi bir xil bo'lganlarni birlashtirish uchun yordamchi funksiya
 function mergeRowsByField(rows, fieldIndex) {
     let merged = [];
     let prevValue = null;
@@ -68,15 +69,19 @@ function mergeRowsByField(rows, fieldIndex) {
 let userRows = users.map((user, idx) => [
     String(idx + 1),
     user.ism,
-    user.familiya
+    user.familiya,
+    user.middlename
 ]);
 
 // Avval familiya bo'yicha tartiblash va birlashtirish
-userRows.sort((a, b) => a[2].localeCompare(b[2]) || a[1].localeCompare(b[1]));
+userRows.sort((a, b) => a[2].localeCompare(b[2]) || a[1].localeCompare(b[1]) || a[3].localeCompare(b[3]));
 userRows = mergeRowsByField(userRows, 2); // familiya (index 2) bo'yicha merge
 
 // Endi ism bo'yicha tartiblash va birlashtirish (faqat familiya merge bo'lmagan joylarda)
 userRows = mergeRowsByField(userRows, 1); // ism (index 1) bo'yicha merge
+
+// Endi otasining ismi bo'yicha tartiblash va birlashtirish (faqat ism va familiya merge bo'lmagan joylarda)
+userRows = mergeRowsByField(userRows, 3); // middlename (index 3) bo'yicha merge
 
 const userTable = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
@@ -128,7 +133,7 @@ const userTable = new Table({
                     children: [
                         new TableCell({
                             children: [new Paragraph({ text: "Ma'lumot yo'q", alignment: AlignmentType.CENTER })],
-                            columnSpan: 3
+                            columnSpan: 4
                         })
                     ]
                 })

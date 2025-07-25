@@ -10,12 +10,11 @@ import {
     TableCell,
     WidthType,
     AlignmentType,
-    BorderStyle
+    BorderStyle,
+    VerticalMergeType,
+    VerticalAlign
 } from "docx";
-
-// NOTE: The data from file_context_0 uses keys like post_title, product_qty, start_date, price, is_bundle, is_refund, etc.
-//       There is no product_name, qty, created_at, price_per_day in the data. 
-//       So, we must map to the correct keys.
+import { log } from "console";
 
 async function generateSingleDocumentWithAllOrders() {
     try {
@@ -24,25 +23,19 @@ async function generateSingleDocumentWithAllOrders() {
             port: 23306,
             user: "lesa_prod",
             password: "lesa_prod$34133$$",
-            database: "lesaapp",
+            database: "lesa_test",
         });
 
-        const order_id = 372;
+        const order_id = 397;
 
         const [rows] = await connection.execute(`Call get__refunded_orders_data(${order_id})`);
-
-        // Uncomment for debugging:
-        // console.dir(rows, { depth: null });
 
         const [rows2] = await connection.execute(`Call get__refunded_order_payment_data(${order_id})`);
 
 
-        // Fetch all payments for this order
         const [paymentRows] = await connection.execute(`SELECT payment_amount, payment_type, date FROM app_order_payment WHERE order_id = ?`, [order_id]);
-        // rows2[0] is the actual data for stored procedures in mysql2
         const paymentData = Array.isArray(rows2) && Array.isArray(rows2[0]) ? rows2[0][0] : (rows2[0] || {});
 
-        // Helper to format values
         function bundleText(is_bundle) {
             return is_bundle == 1 ? " (to'plam)" : "";
         }
@@ -51,20 +44,14 @@ async function generateSingleDocumentWithAllOrders() {
         }
         function priceText(price) {
             if (price === null || price === undefined) return "0 so'm";
-            // Format with thousands separator and "so'm"
+            // Minglik ajratuvchi va "so'm" qo'shish
             return Number(price).toLocaleString("ru-RU") + " so'm";
         }
         function totalPriceText(total) {
             if (total === null || total === undefined) return "0 so'm";
             return Number(total).toLocaleString("ru-RU") + " so'm";
         }
-        function dateText(date) {
-            if (!date) return "";
-            // Format as YYYY-MM-DD
-            const d = new Date(date);
-            if (isNaN(d)) return String(date);
-            return d.toISOString().slice(0, 10);
-        }
+       
         function dateTextDDMMYYYY(date) {
             if (!date) return "";
             const d = new Date(date);
@@ -75,24 +62,107 @@ async function generateSingleDocumentWithAllOrders() {
             return `${day}-${month}-${year}`;
         }
 
-        // rows[0] is the actual data for stored procedures in mysql2
         const dbRows = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : rows;
 
-        // --- Yuborilganlar (order_items_table) ---
-        const yuborilganlar = dbRows.filter(row => row.parent_order_id == null);
-        const yuborilganlarRows = yuborilganlar.map((row, idx) => [
-            String(idx + 1),
-            (row.post_title || "") + bundleText(row.is_bundle),
-            qtyText(row.product_qty),
-            dateTextDDMMYYYY(row.start_date),
-            priceText(row.price)
-        ]);
+        const yuborilganlar = dbRows.filter(row => row.parent_order_id == null && row.is_bundle != 1);
+
+        function getParentProductPrice(row, allRows) {
+            if (row.parent_product_id) {
+                const parent = allRows.find(r => r.product_id == row.parent_product_id);
+                if (parent && parent.price !== undefined && parent.price !== null) {
+                    return parent.price;
+                }
+            }
+            return row.price;
+        }
+        function getParentBundleQty(row, allRows) {
+            if (row.parent_product_id) {
+                // Bir nechta parentlarni qty sini yig'indisini hisoblash
+                const parents = allRows.filter(r => r.order_item_id == row.parent_item_id);
+                console.log(parents);
+                if (parents.length > 0) {
+                    return parents.reduce((sum, parent) => {
+                        if (parent.product_qty !== undefined && parent.product_qty !== null) {
+                            return sum + Number(parent.product_qty);
+                        }
+                        return sum;
+                    }, 0);
+                }
+            }else if (row.parent_item_id==null) {
+                return row.product_qty;
+            }else{
+                return 0;
+            }
+        }
+
+        function mergeRowsByFields(rows, fieldIndexes) {
+            if (!Array.isArray(fieldIndexes)) fieldIndexes = [fieldIndexes];
+            let prevValues = [];
+            let mergeStart = -1;
+            let mergeCount = 0;
+
+            for (let i = 0; i < rows.length; i++) {
+                const vals = fieldIndexes.map(idx => rows[i][idx]);
+                if (
+                    prevValues.length > 0 &&
+                    vals.every((val, idx) => val === prevValues[idx])
+                ) {
+                    mergeCount++;
+                } else {
+                    if (mergeCount > 0) {
+                        for (let j = mergeStart; j < mergeStart + mergeCount + 1; j++) {
+                            fieldIndexes.forEach(idx => {
+                                if (j === mergeStart) {
+                                    rows[j][idx] = { value: rows[j][idx], merge: "restart" };
+                                } else {
+                                    rows[j][idx] = { value: "", merge: "continue" };
+                                }
+                            });
+                        }
+                    }
+                    prevValues = vals;
+                    mergeStart = i;
+                    mergeCount = 0;
+                }
+            }
+            // Oxirgi merge uchun
+            if (mergeCount > 0) {
+                for (let j = mergeStart; j < mergeStart + mergeCount + 1; j++) {
+                    fieldIndexes.forEach(idx => {
+                        if (j === mergeStart) {
+                            rows[j][idx] = { value: rows[j][idx], merge: "restart" };
+                        } else {
+                            rows[j][idx] = { value: "", merge: "continue" };
+                        }
+                    });
+                }
+            }
+            return rows;
+        }
+        let yuborilganlarRows = yuborilganlar.map((row, idx) => {
+            // parent_product_id bo'lsa, narxni parentdan olamiz
+            const priceValue = getParentProductPrice(row, dbRows);
+            return [
+                String(idx + 1),
+                (row.post_title || "") + bundleText(row.is_bundle),
+                qtyText(row.product_qty),
+                (row.parent_product_title == null || getParentBundleQty(row, dbRows) == null || getParentBundleQty(row, dbRows) == 0)
+                    ? ""
+                    : (row.parent_product_title + '\n' + qtyText(getParentBundleQty(row, dbRows))),
+                dateTextDDMMYYYY(row.start_date),
+                priceText(priceValue),
+                priceText(priceValue * getParentBundleQty(row, dbRows))
+            ];
+        });
+
+        yuborilganlarRows = mergeRowsByFields(yuborilganlarRows, [3, 4, 5, 6]);
+
         const yuborilganlarTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             rows: [
                 new TableRow({
                     children: [
-                        ...["№", "Mahsulot nomi", "Soni", "Yuborilgan sanasi", "Kunlik narxi"].map(header =>
+                        ...["№", "Mahsulot nomi", "Soni","To'plam", "Yuborilgan sanasi", "Bir dona to'plam kunlik narxi","Umumiy bir kunlik narxi"].map(header =>
                             new TableCell({
                                 children: [
                                     new Paragraph({
@@ -112,16 +182,32 @@ async function generateSingleDocumentWithAllOrders() {
                 ...(yuborilganlarRows.length > 0
                     ? yuborilganlarRows.map(row =>
                         new TableRow({
-                            children: row.map(val =>
-                                new TableCell({
+                            children: row.map((val, colIdx) => {
+                                let cellProps = {};
+                                let text = val;
+                                if (
+                                    (colIdx === 3 || colIdx === 4 || colIdx === 5 || colIdx === 6) &&
+                                    typeof val === "object" &&
+                                    val !== null &&
+                                    val.merge
+                                ) {
+                                    cellProps.verticalMerge = val.merge === "restart"
+                                        ? VerticalMergeType.RESTART
+                                        : VerticalMergeType.CONTINUE;
+                                    cellProps.verticalAlign = VerticalAlign.CENTER;
+                                    text = val.value;
+                                }
+                                return new TableCell({
+                                    ...cellProps,
                                     children: [
                                         new Paragraph({
-                                            text: val,
-                                            alignment: AlignmentType.CENTER
+                                            text: text,
+                                            alignment: AlignmentType.CENTER,
+                                            spacing: { before: 0, after: 0 },
                                         })
                                     ]
-                                })
-                            )
+                                });
+                            })
                         })
                     )
                     : [
@@ -129,7 +215,7 @@ async function generateSingleDocumentWithAllOrders() {
                             children: [
                                 new TableCell({
                                     children: [new Paragraph({ text: "Ma'lumot yo'q", alignment: AlignmentType.CENTER })],
-                                    columnSpan: 5
+                                    columnSpan: 6
                                 })
                             ]
                         })
@@ -138,24 +224,32 @@ async function generateSingleDocumentWithAllOrders() {
             ]
         });
 
-        // --- Qaytganlar (refund_items_table) ---
-        // Use correct keys: post_title, is_bundle, product_qty, end_date, used_days, price
         const qaytganlar = dbRows.filter(row => row.is_refund == 1);
-        const qaytganlarRows = qaytganlar.map((row, idx) => [
-            String(idx + 1),
-            (row.post_title || "") + bundleText(row.is_bundle),
-            qtyText(Math.abs(row.product_qty)),
-            dateTextDDMMYYYY(row.end_date),
-            row.used_days !== null && row.used_days !== undefined ? `${row.used_days} kun` : "",
-            priceText(Math.abs(row.price)),
-            totalPriceText(Math.abs(row.price) * row.used_days * Math.abs(row.product_qty))
-        ]);
+
+        let qaytganlarRows = qaytganlar.map((row, idx) => {
+            return [
+                String(idx + 1),
+                (row.post_title || "") + bundleText(row.is_bundle),
+                qtyText(Math.abs(row.product_qty)),
+                (row.parent_product_title == null || getParentBundleQty(row, dbRows) == null || getParentBundleQty(row, dbRows) == 0)
+                    ? ""
+                    : (row.parent_product_title + '\n' + qtyText(getParentBundleQty(row, dbRows))),
+                dateTextDDMMYYYY(row.end_date),
+                row.used_days !== null && row.used_days !== undefined ? `${row.used_days} kun` : "",
+                priceText(Math.abs(row.price)),
+                totalPriceText(Math.abs(row.price) * row.used_days * Math.abs(row.product_qty))
+            ];
+        });
+
+        // 3-ustun (To'plam), 4-ustun (Qaytgan sanasi) va 6-ustun (Kunlik narxi) uchun merge bo'lsin
+        qaytganlarRows = mergeRowsByFields(qaytganlarRows, [3, 4, 6]);
+
         const qaytganlarTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             rows: [
                 new TableRow({
                     children: [
-                        ...["№", "Mahsulot nomi", "Soni", "Qaytgan sanasi", "Ishlatilgan kuni", "Kunlik narxi", "Umumiy narxi"].map(header =>
+                        ...["№", "Mahsulot nomi", "Soni","To'plam", "Qaytgan sanasi", "Ishlatilgan kuni", "Kunlik narxi", "Umumiy narxi"].map(header =>
                             new TableCell({
                                 children: [
                                     new Paragraph({
@@ -175,16 +269,34 @@ async function generateSingleDocumentWithAllOrders() {
                 ...(qaytganlarRows.length > 0
                     ? qaytganlarRows.map(row =>
                         new TableRow({
-                            children: row.map(val =>
-                                new TableCell({
+                            children: row.map((val, colIdx) => {
+                                let cellProps = {};
+                                let text = val;
+                                
+                                // 3-ustun (To'plam), 4-ustun (Qaytgan sanasi) va 6-ustun (Kunlik narxi) uchun merge
+                                if (
+                                    (colIdx === 3 || colIdx === 4 || colIdx === 6) &&
+                                    typeof val === "object" &&
+                                    val !== null &&
+                                    val.merge
+                                ) {
+                                    cellProps.verticalMerge = val.merge === "restart"
+                                        ? VerticalMergeType.RESTART
+                                        : VerticalMergeType.CONTINUE;
+                                    cellProps.verticalAlign = VerticalAlign.CENTER;
+                                    text = val.value;
+                                }
+                                return new TableCell({
+                                    ...cellProps,
                                     children: [
                                         new Paragraph({
-                                            text: val,
-                                            alignment: AlignmentType.CENTER
+                                            text: text,
+                                            alignment: AlignmentType.CENTER,
+                                            spacing: { before: 0, after: 0 },
                                         })
                                     ]
-                                })
-                            )
+                                });
+                            })
                         })
                     )
                     : [
@@ -200,9 +312,6 @@ async function generateSingleDocumentWithAllOrders() {
                 )
             ]
         });
-
-        // --- Yo'qotilganlar (lost_items_table) ---
-        // is_refund == null && is_bundle == null
         const yoqotilganlar = dbRows.filter(row => row.is_refund == null && row.is_bundle == null);
         const yoqotilganlarRows = yoqotilganlar.map((row, idx) => [
             String(idx + 1),
@@ -356,20 +465,19 @@ async function generateSingleDocumentWithAllOrders() {
 
         // Helper function to format phone numbers (Uzbekistan style: +998 XX XXX XX XX)
         function formatPhoneNumber(phone) {
-            if (!phone) return "";
-            // Remove all non-digit characters
+            if (phone === null || phone === undefined) return " ";
+            // Barcha raqam bo'lmagan belgilarni olib tashlash
             let digits = phone.replace(/\D/g, "");
-            // If already starts with 998, keep it, else try to add
+            // Agar 9 ta raqam bo'lsa, +998 qo'shamiz
             if (digits.length === 9) {
-                // Assume it's just the local part, add +998
                 digits = "998" + digits;
             } else if (digits.length === 12 && digits.startsWith("998")) {
-                // already correct
+                // To'g'ri formatda
             } else if (digits.length === 13 && digits.startsWith("8")) {
-                // Sometimes numbers start with 8, drop it and add 998
+                // Ba'zan 8 bilan boshlanadi, uni olib tashlab 998 qo'shamiz
                 digits = "998" + digits.slice(1);
             }
-            if (digits.length !== 12) return phone; // fallback to original if not matching
+            if (digits.length !== 12) return " "; // noto'g'ri bo'lsa bosh joy qaytariladi
             return `+${digits.slice(0,3)} ${digits.slice(3,5)} ${digits.slice(5,8)} ${digits.slice(8,10)} ${digits.slice(10,12)}`;
         }
 
