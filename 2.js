@@ -86,6 +86,15 @@ async function generateSingleDocumentWithAllOrders() {
             }
             return row.price;
         }
+        function getParentProductRentalPrice(row, allRows) {
+            if (row.parent_product_id) {
+                const parent = allRows.find(r => r.product_id == row.parent_product_id && r.is_refund == 1);
+                if (parent && parent.rental_price !== undefined && parent.rental_price !== null) {
+                    return parent.rental_price;
+                }
+            }
+            return row.rental_price;
+        }
         function getParentBundleQty(row, allRows) {
             if (row.parent_product_id) {
                 // Bir nechta parentlarni qty sini yig'indisini hisoblash
@@ -164,7 +173,6 @@ async function generateSingleDocumentWithAllOrders() {
                 }
             }
             // Natijani konsolga chiqaramiz (debug uchun)
-            console.log(rows);
             // Birlashtirilgan qatorlarni qaytaramiz
             return rows;
         }
@@ -283,9 +291,11 @@ async function generateSingleDocumentWithAllOrders() {
             ]
         });
 
-        const qaytganlar = dbRows.filter(row => row.is_refund == 1);
+        const qaytganlar = dbRows.filter(row => row.is_refund == 1 && row.is_bundle != 1);
 
         let qaytganlarRows = qaytganlar.map((row, idx) => {
+            const RentalPrice = getParentProductRentalPrice(row, dbRows);
+            // Umumiy narxi sifatida rental price ni ko'rsatamiz
             return [
                 String(idx + 1),
                 (row.post_title || "") + bundleText(row.is_bundle),
@@ -295,33 +305,47 @@ async function generateSingleDocumentWithAllOrders() {
                     : (row.parent_product_title + '\n' + qtyText(getParentBundleQty(row, dbRows))),
                 dateTextDDMMYYYY(row.end_date),
                 row.used_days !== null && row.used_days !== undefined ? `${row.used_days} kun` : "",
-                priceText(Math.abs(row.price)),
-                totalPriceText(Math.abs(row.price) * row.used_days * Math.abs(row.product_qty))
+                priceText(RentalPrice)
             ];
         });
 
-        // 3-ustun (To'plam), 4-ustun (Qaytgan sanasi) va 6-ustun (Kunlik narxi) uchun merge bo'lsin
-        qaytganlarRows = mergeRowsByFields(qaytganlarRows, [3, 4, 6]);
+        // 3-ustun (To'plam), 4-ustun (Qaytgan sanasi), 5-ustun (Ishlatilgan kuni), 6-ustun (Umumiy narxi) uchun merge bo'lsin
+        qaytganlarRows = mergeRowsByFields(qaytganlarRows, [3, 4, 5, 6]);
 
         const qaytganlarTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             rows: [
                 new TableRow({
                     children: [
-                        ...["№", "Mahsulot nomi", "Soni","To'plam", "Qaytgan sanasi", "Ishlatilgan kuni", "Kunlik narxi", "Umumiy narxi"].map(header =>
-                            new TableCell({
-                                children: [
-                                    new Paragraph({
-                                        children: [
-                                            new TextRun({ text: header, bold: true, size: 22, font: "Times New Roman" })
-                                        ],
-                                        alignment: AlignmentType.CENTER,
-                                    })
-                                ],
-                                shading: { fill: "f9e79f" },
-                                borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "000000" } }
-                            })
-                        )
+                        ...["№", "Mahsulot nomi", "Soni","To'plam", "Qaytgan sanasi", "Ishlatilgan kuni","Umumiy narxi"]
+                            .filter((header, idx) => idx !== 6) // remove "Umumiy narxi" at idx 6, will add it at the end
+                            .map(header =>
+                                new TableCell({
+                                    children: [
+                                        new Paragraph({
+                                            children: [
+                                                new TextRun({ text: header, bold: true, size: 22, font: "Times New Roman" })
+                                            ],
+                                            alignment: AlignmentType.CENTER,
+                                        })
+                                    ],
+                                    shading: { fill: "f9e79f" },
+                                    borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "000000" } }
+                                })
+                            ),
+                        // Add "Umumiy narxi" as the last column
+                        new TableCell({
+                            children: [
+                                new Paragraph({
+                                    children: [
+                                        new TextRun({ text: "Umumiy narxi", bold: true, size: 22, font: "Times New Roman" })
+                                    ],
+                                    alignment: AlignmentType.CENTER,
+                                })
+                            ],
+                            shading: { fill: "f9e79f" },
+                            borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "000000" } }
+                        })
                     ],
                     tableHeader: true,
                 }),
@@ -332,9 +356,9 @@ async function generateSingleDocumentWithAllOrders() {
                                 let cellProps = {};
                                 let text = val;
                                 
-                                // 3-ustun (To'plam), 4-ustun (Qaytgan sanasi) va 6-ustun (Kunlik narxi) uchun merge
+                                // 3-ustun (To'plam), 4-ustun (Qaytgan sanasi), 5-ustun (Ishlatilgan kuni), 6-ustun (Umumiy narxi) uchun merge
                                 if (
-                                    (colIdx === 3 || colIdx === 4 || colIdx === 6) &&
+                                    (colIdx === 3 || colIdx === 4 || colIdx === 5 || colIdx === 6) &&
                                     typeof val === "object" &&
                                     val !== null &&
                                     val.merge
