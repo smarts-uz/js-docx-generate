@@ -26,7 +26,7 @@ async function generateSingleDocumentWithAllOrders() {
             database: "lesa_test",
         });
 
-        const order_id = 397;
+        const order_id = 400;
 
         const [rows] = await connection.execute(`Call get__refunded_orders_data(${order_id})`);
 
@@ -61,6 +61,17 @@ async function generateSingleDocumentWithAllOrders() {
             const year = d.getFullYear();
             return `${day}-${month}-${year}`;
         }
+        function dateTextDDMMYYYYHHMM(date) {
+            if (!date) return "";
+            const d = new Date(date);
+            if (isNaN(d)) return "";
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            const hours = String(d.getHours()).padStart(2, '0');
+            const minutes = String(d.getMinutes()).padStart(2, '0');
+            return `${day}-${month}-${year} ${hours}:${minutes}`;
+        }
 
         const dbRows = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : rows;
 
@@ -68,7 +79,7 @@ async function generateSingleDocumentWithAllOrders() {
 
         function getParentProductPrice(row, allRows) {
             if (row.parent_product_id) {
-                const parent = allRows.find(r => r.product_id == row.parent_product_id);
+                const parent = allRows.find(r => r.order_item_id == row.parent_item_id);
                 if (parent && parent.price !== undefined && parent.price !== null) {
                     return parent.price;
                 }
@@ -78,8 +89,7 @@ async function generateSingleDocumentWithAllOrders() {
         function getParentBundleQty(row, allRows) {
             if (row.parent_product_id) {
                 // Bir nechta parentlarni qty sini yig'indisini hisoblash
-                const parents = allRows.filter(r => r.order_item_id == row.parent_item_id);
-                console.log(parents);
+                const parents = allRows.filter(r => r.order_item_id == row.parent_item_id );
                 if (parents.length > 0) {
                     return parents.reduce((sum, parent) => {
                         if (parent.product_qty !== undefined && parent.product_qty !== null) {
@@ -95,37 +105,53 @@ async function generateSingleDocumentWithAllOrders() {
             }
         }
 
+        /**
+         * Jadvaldagi qatorlarni bir nechta ustunlar bo'yicha birlashtirish uchun funksiya.
+         * rows - birlashtiriladigan qatorlar (array of arrays)
+         * fieldIndexes - qaysi ustun(lar) bo'yicha birlashtirish kerak (index yoki indexlar massivi)
+         */
         function mergeRowsByFields(rows, fieldIndexes) {
+            // fieldIndexes massiv emas bo'lsa, uni massivga aylantiramiz
             if (!Array.isArray(fieldIndexes)) fieldIndexes = [fieldIndexes];
-            let prevValues = [];
-            let mergeStart = -1;
-            let mergeCount = 0;
 
+            let prevValues = [];    // Oldingi qatorning birlashtiriladigan ustun(lar) qiymatlari
+            let mergeStart = -1;    // Birlashtirish boshlanadigan qator indeksi
+            let mergeCount = 0;     // Nechta qator birlashtirilayotganini hisoblash
+
+            // Barcha qatorlarni aylanib chiqamiz
             for (let i = 0; i < rows.length; i++) {
+                // Hozirgi qatorning birlashtiriladigan ustun(lar) qiymatlari
                 const vals = fieldIndexes.map(idx => rows[i][idx]);
+
+                // Agar oldingi qiymatlar mavjud bo'lsa va hozirgi qiymatlar hammasi bir xil bo'lsa
                 if (
                     prevValues.length > 0 &&
                     vals.every((val, idx) => val === prevValues[idx])
                 ) {
+                    // Birlashtirish davom etadi
                     mergeCount++;
                 } else {
+                    // Agar oldingi birlashtirish bo'lgan bo'lsa, uni yakunlaymiz
                     if (mergeCount > 0) {
                         for (let j = mergeStart; j < mergeStart + mergeCount + 1; j++) {
                             fieldIndexes.forEach(idx => {
                                 if (j === mergeStart) {
+                                    // Birinchi qator - merge boshlanishi
                                     rows[j][idx] = { value: rows[j][idx], merge: "restart" };
                                 } else {
+                                    // Qolgan qatorlar - merge davom etadi
                                     rows[j][idx] = { value: "", merge: "continue" };
                                 }
                             });
                         }
                     }
+                    // Yangi qiymatlar uchun merge boshlaymiz
                     prevValues = vals;
                     mergeStart = i;
                     mergeCount = 0;
                 }
             }
-            // Oxirgi merge uchun
+            // Oxirgi birlashtirishni ham tekshirib, yakunlaymiz
             if (mergeCount > 0) {
                 for (let j = mergeStart; j < mergeStart + mergeCount + 1; j++) {
                     fieldIndexes.forEach(idx => {
@@ -137,8 +163,13 @@ async function generateSingleDocumentWithAllOrders() {
                     });
                 }
             }
+            // Natijani konsolga chiqaramiz (debug uchun)
+            console.log(rows);
+            // Birlashtirilgan qatorlarni qaytaramiz
             return rows;
         }
+
+        
         let yuborilganlarRows = yuborilganlar.map((row, idx) => {
             // parent_product_id bo'lsa, narxni parentdan olamiz
             const priceValue = getParentProductPrice(row, dbRows);
@@ -149,13 +180,41 @@ async function generateSingleDocumentWithAllOrders() {
                 (row.parent_product_title == null || getParentBundleQty(row, dbRows) == null || getParentBundleQty(row, dbRows) == 0)
                     ? ""
                     : (row.parent_product_title + '\n' + qtyText(getParentBundleQty(row, dbRows))),
-                dateTextDDMMYYYY(row.start_date),
+                // start_date bo'sh bo'lsa, "" chiqaramiz, aks holda formatlaymiz
+                row.start_date ? dateTextDDMMYYYYHHMM(row.start_date) : "salom",
                 priceText(priceValue),
                 priceText(priceValue * getParentBundleQty(row, dbRows))
             ];
         });
 
         yuborilganlarRows = mergeRowsByFields(yuborilganlarRows, [3, 4, 5, 6]);
+
+        // Merge qilib bo'lgandan keyin 5-ustunni (index 4) faqat dd-mm-yyyy formatga o'zgartiramiz
+        yuborilganlarRows = yuborilganlarRows.map(row => {
+            let newRow = [...row];
+            if (newRow[4]) {
+                // Agar qiymat object bo'lsa (merge uchun), value ni o'zgartiramiz
+                if (typeof newRow[4] === "object" && newRow[4] !== null && "value" in newRow[4]) {
+                    // value ichida sana va vaqt bo'lsa, faqat sanani ajratib olamiz
+                    let value = newRow[4].value;
+                    if (typeof value === "string" && value.match(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/)) {
+                        // Masalan: 26-07-2025 07:29 => 26-07-2025
+                        value = value.split(" ")[0];
+                        newRow[4] = { ...newRow[4], value };
+                    } else if (value) {
+                        newRow[4] = { ...newRow[4], value: dateTextDDMMYYYY(value) };
+                    } else {
+                        newRow[4] = { ...newRow[4], value: "salom" };
+                    }
+                } else if (typeof newRow[4] === "string" && newRow[4].match(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/)) {
+                    // Masalan: 26-07-2025 07:29 => 26-07-2025
+                    newRow[4] = newRow[4].split(" ")[0];
+                } else {
+                    newRow[4] = newRow[4] ? dateTextDDMMYYYY(newRow[4]) : "salom";
+                }
+            }
+            return newRow;
+        });
 
         const yuborilganlarTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
