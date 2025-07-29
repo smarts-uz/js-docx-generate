@@ -28,9 +28,9 @@ async function generateSingleDocumentWithAllOrders() {
         const order_id = 419;
 
         const [rows] = await connection.execute(`Call get__refunded_orders_data(${order_id})`);
-
         const [rows2] = await connection.execute(`Call get__refunded_order_payment_data(${order_id})`);
-
+        const [lostRows] = await connection.execute(`Call get__lost_product_data(${order_id})`);
+        const yoqotilganlar = Array.isArray(lostRows) && Array.isArray(lostRows[0]) ? lostRows[0] : (lostRows[0] || {});
 
         const [paymentRows] = await connection.execute(`SELECT payment_amount, payment_type, date FROM app_order_payment WHERE order_id = ?`, [order_id]);
         const paymentData = Array.isArray(rows2) && Array.isArray(rows2[0]) ? rows2[0][0] : (rows2[0] || {});
@@ -90,7 +90,6 @@ async function generateSingleDocumentWithAllOrders() {
             if (row.parent_product_id) {
                 const parent = allRows.find(r => r.product_id == row.parent_product_id && r.is_refund == 1 && r.order_id == row.order_id);
                 if (parent && parent.rental_price !== undefined && parent.rental_price !== null) {
-                    console.log(parent.rental_price);
                     return parent.rental_price;
                 }
             }
@@ -444,7 +443,6 @@ async function generateSingleDocumentWithAllOrders() {
                 )
             ]
         });
-        const yoqotilganlar = dbRows.filter(row => row.is_refund == null && row.is_bundle == null && row.lost_qty > 0);
         const yoqotilganlarRows = yoqotilganlar.map((row, idx) => [
             String(idx + 1),
             row.post_title || "",
