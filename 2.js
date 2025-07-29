@@ -25,7 +25,7 @@ async function generateSingleDocumentWithAllOrders() {
             database: "lesa_test",
         });
 
-        const order_id = 413;
+        const order_id = 419;
 
         const [rows] = await connection.execute(`Call get__refunded_orders_data(${order_id})`);
 
@@ -88,8 +88,9 @@ async function generateSingleDocumentWithAllOrders() {
         }
         function getParentProductRentalPrice(row, allRows) {
             if (row.parent_product_id) {
-                const parent = allRows.find(r => r.product_id == row.parent_product_id && r.is_refund == 1);
+                const parent = allRows.find(r => r.product_id == row.parent_product_id && r.is_refund == 1 && r.order_id == row.order_id);
                 if (parent && parent.rental_price !== undefined && parent.rental_price !== null) {
+                    console.log(parent.rental_price);
                     return parent.rental_price;
                 }
             }
@@ -116,7 +117,7 @@ async function generateSingleDocumentWithAllOrders() {
         function getRefundedParentBundleQty(row, allRows) {
             if (row.parent_product_id) {
                 // Bir nechta parentlarni qty sini yig'indisini hisoblash
-                const parents = allRows.filter(r => r.product_id == row.parent_product_id && r.is_refund == 1);
+                const parents = allRows.filter(r => r.product_id == row.parent_product_id && r.is_refund == 1 && r.order_id == row.order_id);
                 if (parents.length > 0) {
                     return parents.reduce((sum, parent) => {
                         if (parent.product_qty !== undefined && parent.product_qty !== null) {
