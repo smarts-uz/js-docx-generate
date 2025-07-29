@@ -14,7 +14,6 @@ import {
     VerticalMergeType,
     VerticalAlign
 } from "docx";
-import { log } from "console";
 
 async function generateSingleDocumentWithAllOrders() {
     try {
@@ -26,7 +25,7 @@ async function generateSingleDocumentWithAllOrders() {
             database: "lesa_test",
         });
 
-        const order_id = 400;
+        const order_id = 413;
 
         const [rows] = await connection.execute(`Call get__refunded_orders_data(${order_id})`);
 
@@ -70,7 +69,8 @@ async function generateSingleDocumentWithAllOrders() {
             const year = d.getFullYear();
             const hours = String(d.getHours()).padStart(2, '0');
             const minutes = String(d.getMinutes()).padStart(2, '0');
-            return `${day}-${month}-${year} ${hours}:${minutes}`;
+            const seconds = String(d.getSeconds()).padStart(2, '0');
+            return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
         }
 
         const dbRows = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : rows;
@@ -113,7 +113,24 @@ async function generateSingleDocumentWithAllOrders() {
                 return 0;
             }
         }
-
+        function getRefundedParentBundleQty(row, allRows) {
+            if (row.parent_product_id) {
+                // Bir nechta parentlarni qty sini yig'indisini hisoblash
+                const parents = allRows.filter(r => r.product_id == row.parent_product_id && r.is_refund == 1);
+                if (parents.length > 0) {
+                    return parents.reduce((sum, parent) => {
+                        if (parent.product_qty !== undefined && parent.product_qty !== null) {
+                            return Number(Math.abs(parent.product_qty));
+                        }
+                        return sum;
+                    }, 0);
+                }
+            }else if (row.parent_item_id==null) {
+                return Math.abs(row.product_qty);
+            }else{
+                return 0;
+            }
+        }
         /**
          * Jadvaldagi qatorlarni bir nechta ustunlar bo'yicha birlashtirish uchun funksiya.
          * rows - birlashtiriladigan qatorlar (array of arrays)
@@ -189,7 +206,7 @@ async function generateSingleDocumentWithAllOrders() {
                     ? ""
                     : (row.parent_product_title + '\n' + qtyText(getParentBundleQty(row, dbRows))),
                 // start_date bo'sh bo'lsa, "" chiqaramiz, aks holda formatlaymiz
-                row.start_date ? dateTextDDMMYYYYHHMM(row.start_date) : "salom",
+                row.start_date ? dateTextDDMMYYYYHHMM(row.start_date) : "",
                 priceText(priceValue),
                 priceText(priceValue * getParentBundleQty(row, dbRows))
             ];
@@ -203,22 +220,28 @@ async function generateSingleDocumentWithAllOrders() {
             if (newRow[4]) {
                 // Agar qiymat object bo'lsa (merge uchun), value ni o'zgartiramiz
                 if (typeof newRow[4] === "object" && newRow[4] !== null && "value" in newRow[4]) {
-                    // value ichida sana va vaqt bo'lsa, faqat sanani ajratib olamiz
                     let value = newRow[4].value;
-                    if (typeof value === "string" && value.match(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/)) {
+                    if (typeof value === "string" && value.match(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}$/)) {
+                        // Masalan: 26-07-2025 07:29:15 => 26-07-2025
+                        value = value.split(" ")[0];
+                        newRow[4] = { ...newRow[4], value };
+                    } else if (typeof value === "string" && value.match(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/)) {
                         // Masalan: 26-07-2025 07:29 => 26-07-2025
                         value = value.split(" ")[0];
                         newRow[4] = { ...newRow[4], value };
                     } else if (value) {
                         newRow[4] = { ...newRow[4], value: dateTextDDMMYYYY(value) };
                     } else {
-                        newRow[4] = { ...newRow[4], value: "salom" };
+                        newRow[4] = { ...newRow[4], value: "" };
                     }
+                } else if (typeof newRow[4] === "string" && newRow[4].match(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}$/)) {
+                    // Masalan: 26-07-2025 07:29:15 => 26-07-2025
+                    newRow[4] = newRow[4].split(" ")[0];
                 } else if (typeof newRow[4] === "string" && newRow[4].match(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/)) {
                     // Masalan: 26-07-2025 07:29 => 26-07-2025
                     newRow[4] = newRow[4].split(" ")[0];
                 } else {
-                    newRow[4] = newRow[4] ? dateTextDDMMYYYY(newRow[4]) : "salom";
+                    newRow[4] = newRow[4] ? dateTextDDMMYYYY(newRow[4]) : "";
                 }
             }
             return newRow;
@@ -300,10 +323,10 @@ async function generateSingleDocumentWithAllOrders() {
                 String(idx + 1),
                 (row.post_title || "") + bundleText(row.is_bundle),
                 qtyText(Math.abs(row.product_qty)),
-                (row.parent_product_title == null || getParentBundleQty(row, dbRows) == null || getParentBundleQty(row, dbRows) == 0)
+                (row.parent_product_title == null || getRefundedParentBundleQty(row, dbRows) == null || getRefundedParentBundleQty(row, dbRows) == 0)
                     ? ""
-                    : (row.parent_product_title + '\n' + qtyText(getParentBundleQty(row, dbRows))),
-                dateTextDDMMYYYY(row.end_date),
+                    : (row.parent_product_title + '\n' + qtyText(getRefundedParentBundleQty(row, dbRows))),
+                row.end_date ? dateTextDDMMYYYYHHMM(row.end_date) : "",
                 row.used_days !== null && row.used_days !== undefined ? `${row.used_days} kun` : "",
                 priceText(RentalPrice)
             ];
@@ -312,6 +335,31 @@ async function generateSingleDocumentWithAllOrders() {
         // 3-ustun (To'plam), 4-ustun (Qaytgan sanasi), 5-ustun (Ishlatilgan kuni), 6-ustun (Umumiy narxi) uchun merge bo'lsin
         qaytganlarRows = mergeRowsByFields(qaytganlarRows, [3, 4, 5, 6]);
 
+        qaytganlarRows = qaytganlarRows.map(row => {
+            let newRow = [...row];
+            if (newRow[4]) {
+                // Agar qiymat object bo'lsa (merge uchun), value ni o'zgartiramiz
+                if (typeof newRow[4] === "object" && newRow[4] !== null && "value" in newRow[4]) {
+                    let value = newRow[4].value;
+                    // Sana va vaqt formatini to'g'ri aniqlash uchun seconds ham tekshiriladi
+                    if (typeof value === "string" && value.match(/^\d{2}-\d{2}-\d{4}( \d{2}:\d{2}(:\d{2})?)?$/)) {
+                        // Masalan: 26-07-2025 07:29 yoki 26-07-2025 07:29:15 => 26-07-2025
+                        value = value.split(" ")[0];
+                        newRow[4] = { ...newRow[4], value };
+                    } else if (value) {
+                        newRow[4] = { ...newRow[4], value: dateTextDDMMYYYY(value) };
+                    } else {
+                        newRow[4] = { ...newRow[4], value: "" };
+                    }
+                } else if (typeof newRow[4] === "string" && newRow[4].match(/^\d{2}-\d{2}-\d{4}( \d{2}:\d{2}(:\d{2})?)?$/)) {
+                    // Masalan: 26-07-2025 07:29 yoki 26-07-2025 07:29:15 => 26-07-2025
+                    newRow[4] = newRow[4].split(" ")[0];
+                } else {
+                    newRow[4] = newRow[4] ? dateTextDDMMYYYY(newRow[4]) : "";
+                }
+            }
+            return newRow;
+        });
         const qaytganlarTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             rows: [
@@ -395,7 +443,7 @@ async function generateSingleDocumentWithAllOrders() {
                 )
             ]
         });
-        const yoqotilganlar = dbRows.filter(row => row.is_refund == null && row.is_bundle == null);
+        const yoqotilganlar = dbRows.filter(row => row.is_refund == null && row.is_bundle == null && row.lost_qty > 0);
         const yoqotilganlarRows = yoqotilganlar.map((row, idx) => [
             String(idx + 1),
             row.post_title || "",
